@@ -40,7 +40,7 @@ void readSerial(void*parameter){
 
         if(msg_flag == 0){
           
-          msg_ptr = (char*)pvPortMalloc(idx * sizeof(char));
+          msg_ptr = (char*)pvPortMalloc((idx+1) * sizeof(char));
 
           // Dersom malloc returnerer 0, gi feilmelding og reset
           configASSERT(msg_ptr);
