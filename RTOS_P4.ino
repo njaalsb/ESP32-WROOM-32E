@@ -1,105 +1,142 @@
-# Denne koden fungerer ikke helt som den skal, men det var dette han i digikey-videoen kom frem til.
+/**
+ * FreeRTOS Heap Demo
+ * 
+ * One task reads from Serial, constructs a message buffer, and the second
+ * prints the message to the console.
+ * 
+ * Date: December 5, 2020
+ * Author: Shawn Hymel
+ * License: 0BSD
+ */
 
-// use only one core
+// Use only core 1 for demo purposes
 #if CONFIG_FREERTOS_UNICORE
-static const BaseType_t app_cpu = 0;
+  static const BaseType_t app_cpu = 0;
 #else
-static const BaseType_t app_cpu = 1;
+  static const BaseType_t app_cpu = 1;
 #endif
 
-// Settings:
+// Settings
 static const uint8_t buf_len = 255;
 
-// Globale variabler:
+// Globals
 static char *msg_ptr = NULL;
 static volatile uint8_t msg_flag = 0;
 
+//*****************************************************************************
+// Tasks
 
-// Tasks:
+// Task: read message from Serial buffer
+void readSerial(void *parameters) {
 
-void readSerial(void*parameter){
   char c;
   char buf[buf_len];
   uint8_t idx = 0;
 
-  // Tømmer bufferen:
+  // Clear whole buffer
   memset(buf, 0, buf_len);
+  
+  // Loop forever
+  while (1) {
 
-  // uendelig løkke:
-  while(1){
-    if(Serial.available() > 0){
+    // Read cahracters from serial
+    if (Serial.available() > 0) {
       c = Serial.read();
 
-      if(idx < buf_len - 1){
+      // Store received character to buffer if not over buffer limit
+      if (idx < buf_len - 1) {
         buf[idx] = c;
         idx++;
       }
-      if(c == '\n'){
 
-        buf[idx-1] = '\0';
+      // Create a message buffer for print task
+      if (c == '\n') {
 
-        if(msg_flag == 0){
-          
-          msg_ptr = (char*)pvPortMalloc((idx+1) * sizeof(char));
+        // The last character in the string is '\n', so we need to replace
+        // it with '\0' to make it null-terminated
+        buf[idx - 1] = '\0';
 
-          // Dersom malloc returnerer 0, gi feilmelding og reset
+        // Try to allocate memory and copy over message. If message buffer is
+        // still in use, ignore the entire message.
+        if (msg_flag == 0) {
+          msg_ptr = (char *)pvPortMalloc((idx + 1) * sizeof(char));
+
+          // If malloc returns 0 (out of memory), throw an error and reset
           configASSERT(msg_ptr);
 
-          // Kopier meldingen:
+          // Copy message
           memcpy(msg_ptr, buf, idx);
 
-          // Gi beskjed til den andre tasken at resultatet er klart. 
+          // Notify other task that message is ready
           msg_flag = 1;
-        } 
+        }
 
+        // Reset receive buffer and index counter
         memset(buf, 0, buf_len);
         idx = 0;
       }
     }
+    vTaskDelay(10 / portTICK_PERIOD_MS);
   }
 }
 
-void printMessage(void*parameter){
-  // Gjør ingenting før flagget indikerer at bufferen er full
-  while(1){
-    if(msg_flag == 1){
+// Task: print message whenever flag is set and free buffer
+void printMessage(void *parameters) {
+  while (1) {
+
+    // Wait for flag to be set and print message
+    if (msg_flag == 1) {
       Serial.println(msg_ptr);
 
-      // Gir mengde fri minne på heapen:
-      Serial.print("Free heap (bytes): ");
-      Serial.println(xPortGetFreeHeapSize());
-      //Serial.println(xPortGetFreeHeapSize());
+      // Give amount of free heap memory (uncomment if you'd like to see it)
+//      Serial.print("Free heap (bytes): ");
+//      Serial.println(xPortGetFreeHeapSize());
 
-      // Tøm buffer:
+      // Free buffer, set pointer to null, and clear flag
       vPortFree(msg_ptr);
       msg_ptr = NULL;
       msg_flag = 0;
-    } 
+    }
+    vTaskDelay(10 / portTICK_PERIOD_MS);  
   }
 }
 
-
+//*****************************************************************************
+// Main (runs as its own task with priority 1 on core 1)
 
 void setup() {
-  // put your setup code here, to run once:
+
+  // Configure Serial
   Serial.begin(115200);
 
-  // Lite delay i starten:
-  vTaskDelay(1000/portTICK_PERIOD_MS);
+  // Wait a moment to start (so we don't miss Serial output)
+  vTaskDelay(1000 / portTICK_PERIOD_MS);
   Serial.println();
   Serial.println("---FreeRTOS Heap Demo---");
   Serial.println("Enter a string");
 
-  // Serial recieve task:
-  xTaskCreatePinnedToCore(readSerial, "Read Serial", 1024, NULL, 1, NULL, app_cpu);
-  // Serial print task:
-  xTaskCreatePinnedToCore(printMessage, "Print Message", 1024, NULL, 1, NULL, app_cpu);
+  // Start Serial receive task
+  xTaskCreatePinnedToCore(readSerial,
+                          "Read Serial",
+                          1024,
+                          NULL,
+                          1,
+                          NULL,
+                          app_cpu);
 
-  // delete setup and loop task:
+  // Start Serial print task
+  xTaskCreatePinnedToCore(printMessage,
+                          "Print Message",
+                          1024,
+                          NULL,
+                          1,
+                          NULL,
+                          app_cpu);
+  
+  // Delete "setup and loop" task
   vTaskDelete(NULL);
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
-
+  // Execution should never get here
 }
